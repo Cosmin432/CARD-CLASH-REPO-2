@@ -1,0 +1,5 @@
+D:/Proiecte/Card Clash/Clash of Cards/.utmp/Debug/2k4a6i4l/arm64-v8a/CMakeFiles/edit_cache.dir
+D:/Proiecte/Card Clash/Clash of Cards/.utmp/Debug/2k4a6i4l/arm64-v8a/CMakeFiles/rebuild_cache.dir
+D:/Proiecte/Card Clash/Clash of Cards/.utmp/Debug/2k4a6i4l/arm64-v8a/GameActivity/CMakeFiles/game.dir
+D:/Proiecte/Card Clash/Clash of Cards/.utmp/Debug/2k4a6i4l/arm64-v8a/GameActivity/CMakeFiles/edit_cache.dir
+D:/Proiecte/Card Clash/Clash of Cards/.utmp/Debug/2k4a6i4l/arm64-v8a/GameActivity/CMakeFiles/rebuild_cache.dir
