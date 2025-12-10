@@ -9,6 +9,6 @@ Am implementat **comunicarea în rețea între jucători**, inclusiv trimiterea 
 
 Logica jocului va fi preluată din vechiul repository și trebuie integrată în scena principală de joc (`Game Scene`) pentru a funcționa complet.
 
-##Video
+## Video
 
 https://drive.google.com/drive/folders/1RdW9H_HD6zuxbgW5NSihQQq4rKYPoTLg?usp=sharing
