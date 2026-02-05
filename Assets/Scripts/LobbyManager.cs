@@ -14,9 +14,14 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public GameObject popupScreen;
     public TMP_Text myReadyText;
     public TMP_Text lobbyStatusText;
+    public TMP_Dropdown deck;
+    public TMP_Text opponentDeckText; // Text pentru a afișa deck-ul adversarului
 
     [Header("Network Prefab")]
     public GameObject lobbyNetworkHandlerPrefab;
+
+    [Header("Game Scene Network Prefab")]
+    public GameObject gameNetworkHandlerPrefab;
 
     [Header("Assign your Game Scene")]
     public SceneRef gameScene;
@@ -25,9 +30,20 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public string lobbyName = "MyRoom";
 
     private Dictionary<PlayerRef, bool> playerReady = new Dictionary<PlayerRef, bool>();
+    private Dictionary<PlayerRef, int> playerDeckSelections = new Dictionary<PlayerRef, int>();
     private NetworkRunner runner;
     private bool isRunnerActive = false;
     private LobbyNetworkHandler networkHandler;
+    private bool gameHandlerSpawned = false;
+
+    private void Start()
+    {
+        // Adăugăm listener pentru dropdown
+        if (deck != null)
+        {
+            deck.onValueChanged.AddListener(OnDeckSelectionChanged);
+        }
+    }
 
     public void EditPopup(string message)
     {
@@ -48,7 +64,7 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         runner = FindObjectOfType<NetworkRunner>();
-        
+
         if (runner == null)
         {
             if (runnerPrefab != null)
@@ -77,7 +93,7 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         runner = GetOrCreateRunner();
-        
+
         if (runner == null)
         {
             Debug.LogError("Failed to create NetworkRunner!");
@@ -105,18 +121,24 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         if (result.Ok)
         {
             isRunnerActive = true;
-            
+
             if (lobbyNetworkHandlerPrefab != null)
             {
                 var handlerObj = runner.Spawn(lobbyNetworkHandlerPrefab);
                 networkHandler = handlerObj.GetComponent<LobbyNetworkHandler>();
                 networkHandler.Initialize(this);
             }
-            
+
             EditPopup("Lobby created!");
             mainScreen.SetActive(false);
             lobbyScreen.SetActive(true);
             popupScreen.SetActive(false);
+
+            // Setăm deck-ul implicit pentru jucătorul local
+            if (deck != null)
+            {
+                OnDeckSelectionChanged(deck.value);
+            }
         }
         else
         {
@@ -134,7 +156,7 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         runner = GetOrCreateRunner();
-        
+
         if (runner == null)
         {
             Debug.LogError("Failed to create NetworkRunner!");
@@ -166,6 +188,9 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
             mainScreen.SetActive(false);
             lobbyScreen.SetActive(true);
             popupScreen.SetActive(false);
+
+            // Așteaptă puțin pentru ca networkHandler să fie disponibil
+            StartCoroutine(SendInitialDeckSelection());
         }
         else
         {
@@ -175,6 +200,75 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
+    private System.Collections.IEnumerator SendInitialDeckSelection()
+    {
+        yield return new WaitForSeconds(0.5f);
+
+        if (deck != null)
+        {
+            OnDeckSelectionChanged(deck.value);
+        }
+    }
+
+    /// <summary>
+    /// Callback pentru când jucătorul local schimbă selecția de deck din dropdown
+    /// </summary>
+    private void OnDeckSelectionChanged(int deckIndex)
+    {
+        Debug.Log($"=== OnDeckSelectionChanged called with index: {deckIndex} ===");
+
+        if (runner == null || !isRunnerActive)
+        {
+            Debug.LogWarning("Cannot change deck selection: not connected");
+            return;
+        }
+
+        if (networkHandler == null)
+        {
+            networkHandler = FindObjectOfType<LobbyNetworkHandler>();
+            if (networkHandler == null)
+            {
+                Debug.LogError("LobbyNetworkHandler not found!");
+                return;
+            }
+        }
+
+        Debug.Log($"Local player {runner.LocalPlayer} selected deck: {deckIndex}");
+        Debug.Log($"Runner is server: {runner.IsServer}");
+
+        // Trimitem selecția către server
+        networkHandler.RPC_SetPlayerDeck(runner.LocalPlayer, deckIndex);
+    }
+
+    /// <summary>
+    /// Callback apelat când un jucător își schimbă selecția de deck
+    /// </summary>
+    public void OnDeckSelectionChanged(PlayerRef player, int deckIndex)
+    {
+        Debug.Log($"[CALLBACK] Player {player} selected deck: {deckIndex}");
+
+        playerDeckSelections[player] = deckIndex;
+
+        // Actualizăm UI-ul doar pentru adversar
+        if (runner != null && player != runner.LocalPlayer && opponentDeckText != null)
+        {
+            string deckName = GetDeckName(deckIndex);
+            opponentDeckText.text = $"Opponent's Deck: {deckName}";
+        }
+    }
+
+    /// <summary>
+    /// Helper pentru a obține numele deck-ului pe baza indexului
+    /// </summary>
+    private string GetDeckName(int index)
+    {
+        if (deck != null && index >= 0 && index < deck.options.Count)
+        {
+            return deck.options[index].text;
+        }
+        return $"Deck {index}";
+    }
+
     public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
     {
         Debug.Log("Player joined: " + player);
@@ -182,19 +276,22 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         if (!playerReady.ContainsKey(player))
             playerReady[player] = false;
 
+        if (!playerDeckSelections.ContainsKey(player))
+            playerDeckSelections[player] = 0; // Deck implicit
+
         UpdateLobbyStatus();
     }
 
     public void SetReady()
     {
         Debug.Log($"SetReady called. Runner null: {runner == null}, Active: {isRunnerActive}");
-        
+
         if (runner == null)
         {
             Debug.LogError("Runner is null!");
             return;
         }
-        
+
         if (!isRunnerActive)
         {
             Debug.LogError("Runner is not active!");
@@ -215,7 +312,7 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         playerReady.TryGetValue(runner.LocalPlayer, out currentReady);
 
         bool newReady = !currentReady;
-        
+
         Debug.Log($"Local player {runner.LocalPlayer} setting ready to: {newReady}");
 
         networkHandler.RPC_SetPlayerReady(runner.LocalPlayer, newReady);
@@ -224,7 +321,7 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnReadyStateChanged(PlayerRef player, bool ready)
     {
         Debug.Log($"[CALLBACK] Player {player} ready state: {ready}");
-        
+
         playerReady[player] = ready;
 
         if (runner != null && player == runner.LocalPlayer && myReadyText != null)
@@ -280,13 +377,14 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         Debug.Log("Disconnecting from lobby...");
-        
+
         playerReady.Clear();
+        playerDeckSelections.Clear();
         isRunnerActive = false;
         networkHandler = null;
 
         await runner.Shutdown(shutdownReason: ShutdownReason.Ok);
-        
+
         if (runner != null)
         {
             runner.RemoveCallbacks(this);
@@ -302,18 +400,19 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public void ExitApplication()
     {
         Debug.Log("Exiting application...");
-        
-        #if UNITY_EDITOR
-            UnityEditor.EditorApplication.isPlaying = false;
-        #else
+
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
             Application.Quit();
-        #endif
+#endif
     }
 
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
     {
         Debug.Log($"Player left: {player}");
         playerReady.Remove(player);
+        playerDeckSelections.Remove(player);
 
         UpdateLobbyStatus();
 
@@ -327,11 +426,13 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
     {
         Debug.Log($"Runner shutdown: {shutdownReason}");
-        
+
         playerReady.Clear();
+        playerDeckSelections.Clear();
         isRunnerActive = false;
         networkHandler = null;
-        
+        gameHandlerSpawned = false;
+
         if (mainScreen != null && lobbyScreen != null)
         {
             mainScreen.SetActive(true);
@@ -345,6 +446,11 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             runner.RemoveCallbacks(this);
         }
+
+        if (deck != null)
+        {
+            deck.onValueChanged.RemoveListener(OnDeckSelectionChanged);
+        }
     }
 
     public void OnConnectedToServer(NetworkRunner runner) { }
@@ -355,7 +461,33 @@ public class LobbyManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnInput(NetworkRunner runner, NetworkInput input) { }
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
     public void OnSceneLoadStart(NetworkRunner runner) { }
-    public void OnSceneLoadDone(NetworkRunner runner) { }
+
+    public void OnSceneLoadDone(NetworkRunner runner)
+    {
+        Debug.Log("Scene load completed!");
+
+        // Simple check: if we're not in the lobby anymore and haven't spawned the handler yet
+        // Only the Host/Server spawns the network handler
+        if (runner.IsServer && gameNetworkHandlerPrefab != null && !gameHandlerSpawned)
+        {
+            // Small delay to ensure scene is fully loaded
+            StartCoroutine(SpawnGameHandlerDelayed(runner));
+        }
+    }
+
+    private System.Collections.IEnumerator SpawnGameHandlerDelayed(NetworkRunner runner)
+    {
+        yield return new WaitForSeconds(0.5f);
+
+        // Check if we're in the game scene by checking if lobby UI is inactive
+        if (lobbyScreen != null && !lobbyScreen.activeSelf)
+        {
+            var handlerObj = runner.Spawn(gameNetworkHandlerPrefab, Vector3.zero, Quaternion.identity);
+            gameHandlerSpawned = true;
+            Debug.Log("GameNetworkHandler spawned by Host!");
+        }
+    }
+
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, System.ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
